@@ -295,6 +295,8 @@ auto main(int argc, char **argv) -> int {
     }
 
     std::cout << "Club Number: " << ata_data->header.club_number << std::endl;
+    std::cout << ata_data->header.events.size() << " events and " << ata_data->shooters.size() << " shooters loaded.";
+    std::cout << std::endl;
 
     while(true) {
         std::cout << "[P]rint Scores, [V]iew Shooter Info, [Q]uit" << std::endl;
