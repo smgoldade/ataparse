@@ -50,13 +50,13 @@ auto constexpr EVENTS_OFFSET = offsetof(header, events);
 struct raw_score {
     char hit[3];
     char shot_at[3];
-    char yardage_gained[4];
+    char yardage[4];
 };
 
 struct score {
     unsigned short hit;
     unsigned short shot_at;
-    float yardage_gained; // probably would cause rounding errors, but meh
+    float yardage; // probably would cause rounding errors, but meh
 };
 
 struct raw_shooter {
@@ -152,7 +152,7 @@ auto read_ata_data(const char* file_name) -> ata_data_file* {
 
         auto shooter = new struct shooter;
         memset(shooter, 0, SHOOTER_SCORES_OFFSET);
-        memcpy_s(shooter->ata_number, 8, raw_shooter->ata_number, 8);
+        memcpy_s(shooter->ata_number, 7, raw_shooter->ata_number, 7);
         memcpy_s(shooter->name, 18, raw_shooter->name, 18);
         memcpy_s(shooter->address, 25, raw_shooter->address, 25);
         memcpy_s(shooter->city, 18, raw_shooter->city, 18);
@@ -167,8 +167,8 @@ auto read_ata_data(const char* file_name) -> ata_data_file* {
             score->hit = static_cast<unsigned short>(strtol(target_nullterm, nullptr, 10));
             memcpy_s(target_nullterm, 3, raw_score.shot_at,3 );
             score->shot_at = static_cast<unsigned short>(strtol(target_nullterm, nullptr, 10));
-            memcpy_s(target_nullterm, 4, raw_score.yardage_gained, 4);
-            score->yardage_gained = strtof(target_nullterm, nullptr);
+            memcpy_s(target_nullterm, 4, raw_score.yardage, 4);
+            score->yardage = strtof(target_nullterm, nullptr);
 
             shooter->scores.push_back(score);
         }
@@ -179,26 +179,110 @@ auto read_ata_data(const char* file_name) -> ata_data_file* {
     return data_file;
 }
 
+auto print_event(const event* event) -> void {
+    auto const date = event->date;
+    std::cout << date[0] << date[1] << "/" << date[2] << date[3] << "/" << date[4] << date[5] << date[6] << date[7];
+    std::cout << " : " << event->targets << " ";
+    switch(event->event_type) {
+        case event_type::SINGLES:
+            std::cout << "Singles";
+        break;
+        case event_type::DOUBLES:
+            std::cout << "Doubles";
+        break;
+        case event_type::HANDICAP:
+            std::cout << "Handicap";
+        break;
+    }
+}
+
 auto display_events(const ata_data_file* ata_data) -> void {
     for(auto i=0; i<ata_data->header.events.size(); ++i) {
-        auto event = ata_data->header.events[i];
+        auto const event = ata_data->header.events[i];
         std::cout << "\t[" << i << "] " << event->targets << " ";
-        switch(event->event_type) {
-            case event_type::SINGLES:
-                std::cout << "Singles";
-            break;
-            case event_type::DOUBLES:
-                std::cout << "Doubles";
-            break;
-            case event_type::HANDICAP:
-                std::cout << "Handicap";
-            break;
+        print_event(event);
+        std::cout << std::endl;
+    }
+}
+
+auto print_scores(const ata_data_file* ata_data) -> void {
+    display_events(ata_data);
+    std::cout << "Which event?" << std::endl << "Event #: ";
+    char event_number[4096] = {};
+    std::cin.getline(event_number, 4096);
+
+    auto event_index = strtol(event_number, nullptr, 10);
+    if(event_index < 0 || event_index >= ata_data->header.events.size()) {
+        std::cout << "Invalid event selected!" << std::endl;
+        print_scores(ata_data);
+        return;
+    }
+
+    auto selected_event = ata_data->header.events[event_index];
+    print_event(selected_event);
+    std::cout << std::endl;
+
+    auto score_map = std::multimap<unsigned short, char*, std::greater<unsigned short>>();
+    for(auto & shooter : ata_data->shooters) {
+        auto selected_score = shooter->scores[event_index];
+        if(selected_score->shot_at == 0) continue;
+
+        score_map.emplace(selected_score->hit, shooter->name);
+    }
+
+    std::cout << score_map.size() << " shooters" << std::endl;
+    for(auto & sorted_score : score_map) {
+        printf("%3d %s\n", sorted_score.first, sorted_score.second);
+    }
+    std::cout << std::endl;
+}
+
+auto print_shooter_info(const ata_data_file* ata_data, const shooter* shooter) -> void {
+    std::cout << shooter->name << std::endl;
+    std::cout << "ATA Number: " << shooter->ata_number << std::endl;
+    std::cout << "Address: " << shooter->address << ", " << shooter->city << ", " << shooter->state << " " << shooter->postal_code << std::endl;
+    std::cout << "Scores: " << std::endl;
+
+    for(auto i=0; i<shooter->scores.size(); ++i) {
+        if(i >= ata_data->header.events.size()) break;
+        auto const score = shooter->scores[i];
+        auto const event = ata_data->header.events[i];
+        if(score->shot_at == 0) continue;
+        std::cout << "\t";
+        print_event(event);
+        std::cout << "   " << score->hit << "/" << score->shot_at;
+        if(score->yardage > 0.0f) {
+            printf(" %1.1f yd", score->yardage);
         }
         std::cout << std::endl;
     }
 }
 
-int main(int argc, char **argv) {
+auto display_shooters(const ata_data_file* ata_data) -> void {
+    for(auto i=0; i<ata_data->shooters.size(); ++i) {
+        auto const shooter = ata_data->shooters[i];
+        std::cout << "\t[" << i << "] " << shooter->name << std::endl;
+    }
+}
+
+auto view_shooter_info(const ata_data_file* ata_data) -> void {
+    display_shooters(ata_data);
+    std::cout << "Which shooter?" << std::endl << "Shooter #: ";
+    char shooter_number[4096] = {};
+    std::cin.getline(shooter_number, 4096);
+
+    auto shooter_index = strtol(shooter_number, nullptr, 10);
+    if(shooter_index < 0 || shooter_index >= ata_data->shooters.size()) {
+        std::cout << "Invalid shooter selected!" << std::endl;
+        view_shooter_info(ata_data);
+        return;
+    }
+
+    auto selected_shooter = ata_data->shooters[shooter_index];
+    print_shooter_info(ata_data, selected_shooter);
+}
+
+auto main(int argc, char **argv) -> int {
     if (argc != 2) {
         std::cerr << "Usage: <file>" << std::endl;
         return -1;
@@ -206,64 +290,30 @@ int main(int argc, char **argv) {
 
     auto file_name = argv[1];
     auto ata_data = read_ata_data(file_name);
+    if(!ata_data) {
+        return -1;
+    }
 
     std::cout << "Club Number: " << ata_data->header.club_number << std::endl;
 
     while(true) {
-        std::cout << "[P]rint Scores, [Q]uit" << std::endl;
+        std::cout << "[P]rint Scores, [V]iew Shooter Info, [Q]uit" << std::endl;
         std::cout << "Command: ";
         char command[256];
         std::cin.getline(command, 256);
 
         switch(command[0]) {
             case 'P':
-            case 'p': {
-                display_events(ata_data);
-                std::cout << "Which event?" << std::endl << "Event #: ";
-                char event_number[4] = {};
-                std::cin.getline(event_number, 4);
-
-                auto event_index = strtol(event_number, nullptr, 10);
-                if(event_index < 0 || event_index >= ata_data->header.events.size()) {
-                    std::cerr << "Invalid event selected!" << std::endl;
-                    break;
-                }
-
-                auto selected_event = ata_data->header.events[event_index];
-                auto date = selected_event->date;
-                std::cout << date[0] << date[1] << "/" << date[2] << date[3] << "/" << date[4] << date[5] << date[6] << date[7];
-                std::cout << " : " << selected_event->targets << " ";
-                switch(selected_event->event_type) {
-                    case event_type::SINGLES:
-                        std::cout << "Singles";
-                    break;
-                    case event_type::DOUBLES:
-                        std::cout << "Doubles";
-                    break;
-                    case event_type::HANDICAP:
-                        std::cout << "Handicap";
-                    break;
-                }
-                std::cout << std::endl;
-
-                auto score_map = std::multimap<unsigned short, char*, std::greater<unsigned short>>();
-                for(auto & shooter : ata_data->shooters) {
-                    auto selected_score = shooter->scores[event_index];
-                    if(selected_score->shot_at == 0) continue;
-
-                    score_map.emplace(selected_score->hit, shooter->name);
-                }
-
-                std::cout << score_map.size() << " shooters" << std::endl;
-                for(auto & sorted_score : score_map) {
-                    printf("%3d %s\n", sorted_score.first, sorted_score.second);
-                }
-                std::cout << std::endl;
+            case 'p':
+                print_scores(ata_data);
                 break;
-            }
             case 'Q':
             case 'q':
                 goto quit; // GASP I DID IT
+            case 'V':
+            case 'v':
+                view_shooter_info(ata_data);
+                break;
             default:
                 std::cout << "Unknown command!" << std::endl;
                 break;
